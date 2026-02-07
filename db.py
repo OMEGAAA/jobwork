@@ -5,6 +5,15 @@ db.py - SQLiteデータベース操作モジュール
 import sqlite3
 from datetime import datetime
 from contextlib import contextmanager
+from zoneinfo import ZoneInfo
+
+# 日本時間のタイムゾーン
+JST = ZoneInfo("Asia/Tokyo")
+
+
+def get_jst_now() -> str:
+    """日本時間の現在時刻をISO形式で返す"""
+    return datetime.now(JST).strftime("%Y-%m-%d %H:%M:%S")
 
 DATABASE = "quest_board.db"
 
@@ -138,14 +147,16 @@ def create_quest(title: str, description: str, priority: int, due_date: str, cre
     if not creator or not creator.strip():
         raise ValueError("作成者は必須です")
     
+    now = get_jst_now()
     with get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute("""
             INSERT INTO quests (title, description, priority, due_date, estimated_minutes, creator, 
-                               recurrence_type, recurrence_end_date, parent_quest_id, recurrence_weekdays)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                               recurrence_type, recurrence_end_date, parent_quest_id, recurrence_weekdays,
+                               created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (title.strip(), description, priority, due_date, estimated_minutes, creator.strip(),
-              recurrence_type, recurrence_end_date, parent_quest_id, recurrence_weekdays))
+              recurrence_type, recurrence_end_date, parent_quest_id, recurrence_weekdays, now, now))
         conn.commit()
         return cursor.lastrowid
 
@@ -183,7 +194,7 @@ def update_quest(quest_id: int, **kwargs) -> bool:
     if not updates:
         return False
     
-    updates["updated_at"] = datetime.now().isoformat()
+    updates["updated_at"] = get_jst_now()
     set_clause = ", ".join(f"{k} = ?" for k in updates.keys())
     values = list(updates.values()) + [quest_id]
     
@@ -227,12 +238,13 @@ def add_comment(quest_id: int, user: str, content: str, file_path: str = None, l
         if log_type == "user":
             raise ValueError("ユーザー名は必須です")
     
+    now = get_jst_now()
     with get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute("""
-            INSERT INTO comments (quest_id, user, content, file_path, log_type)
-            VALUES (?, ?, ?, ?, ?)
-        """, (quest_id, user.strip(), content.strip(), file_path, log_type))
+            INSERT INTO comments (quest_id, user, content, file_path, log_type, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (quest_id, user.strip(), content.strip(), file_path, log_type, now))
         conn.commit()
         return cursor.lastrowid
 
@@ -256,12 +268,13 @@ def create_resource(title: str, url: str, category: str, tags: str, memo: str, c
     if not url or not url.strip():
         raise ValueError("URLは必須です")
     
+    now = get_jst_now()
     with get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute("""
-            INSERT INTO resources (title, url, category, tags, memo, created_by)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, (title.strip(), url.strip(), category, tags, memo, created_by))
+            INSERT INTO resources (title, url, category, tags, memo, created_by, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (title.strip(), url.strip(), category, tags, memo, created_by, now, now))
         conn.commit()
         return cursor.lastrowid
 
@@ -291,7 +304,7 @@ def update_resource(resource_id: int, **kwargs) -> bool:
     if not updates:
         return False
     
-    updates["updated_at"] = datetime.now().isoformat()
+    updates["updated_at"] = get_jst_now()
     set_clause = ", ".join(f"{k} = ?" for k in updates.keys())
     values = list(updates.values()) + [resource_id]
     
@@ -317,9 +330,9 @@ def increment_view_count(resource_id: int) -> bool:
         cursor = conn.cursor()
         cursor.execute("""
             UPDATE resources 
-            SET view_count = view_count + 1, last_viewed_at = CURRENT_TIMESTAMP 
+            SET view_count = view_count + 1, last_viewed_at = ? 
             WHERE id = ?
-        """, (resource_id,))
+        """, (get_jst_now(), resource_id))
         conn.commit()
         return cursor.rowcount > 0
 
@@ -367,25 +380,27 @@ def get_templates():
 
 def create_template(title: str, description: str, priority: int, estimated_minutes: int) -> int:
     """テンプレートを新規作成"""
+    now = get_jst_now()
     with get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute("""
-            INSERT INTO quest_templates (title, description, priority, estimated_minutes)
-            VALUES (?, ?, ?, ?)
-        """, (title.strip(), description, priority, estimated_minutes))
+            INSERT INTO quest_templates (title, description, priority, estimated_minutes, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (title.strip(), description, priority, estimated_minutes, now, now))
         conn.commit()
         return cursor.lastrowid
 
 
 def update_template(template_id: int, title: str, description: str, priority: int, estimated_minutes: int):
     """テンプレートを更新"""
+    now = get_jst_now()
     with get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute("""
             UPDATE quest_templates
-            SET title = ?, description = ?, priority = ?, estimated_minutes = ?, updated_at = CURRENT_TIMESTAMP
+            SET title = ?, description = ?, priority = ?, estimated_minutes = ?, updated_at = ?
             WHERE id = ?
-        """, (title.strip(), description, priority, estimated_minutes, template_id))
+        """, (title.strip(), description, priority, estimated_minutes, now, template_id))
         conn.commit()
 
 
