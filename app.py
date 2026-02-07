@@ -449,6 +449,47 @@ if not st.session_state.username:
     st.info("👈 サイドバーから冒険者名を入力してください")
     st.stop()
 
+# ========== 現在時刻表示（ブラウザのローカル時刻） ==========
+st.markdown("""
+<div id="current-time-display" style="
+    text-align: right;
+    padding: 8px 16px;
+    margin-bottom: 10px;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 10px;
+    border: 1px solid rgba(233, 69, 96, 0.3);
+">
+    <span style="color: #a0a0a0; font-size: 0.85rem;">🕐 現在時刻: </span>
+    <span id="live-clock" style="
+        font-family: 'Orbitron', monospace;
+        font-size: 1.1rem;
+        color: #ffd93d;
+        text-shadow: 0 0 10px rgba(255, 217, 61, 0.5);
+    ">--:--:--</span>
+</div>
+<script>
+function updateClock() {
+    const now = new Date();
+    const options = {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false
+    };
+    const timeString = now.toLocaleString('ja-JP', options);
+    const clockElement = document.getElementById('live-clock');
+    if (clockElement) {
+        clockElement.textContent = timeString;
+    }
+}
+updateClock();
+setInterval(updateClock, 1000);
+</script>
+""", unsafe_allow_html=True)
+
 # ========== ページ: クエストボード ==========
 if page == "📋 ボード":
     st.header("📋 ボード")
