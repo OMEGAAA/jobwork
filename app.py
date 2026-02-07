@@ -182,31 +182,6 @@ def status_label(status: str) -> str:
     }
     return labels.get(status, status)
 
-def remaining_time(due_date: str) -> str:
-    """期限までの残り時間を計算"""
-    if not due_date:
-        return ""
-    
-    from datetime import datetime, date
-    try:
-        due = datetime.strptime(due_date, "%Y-%m-%d").date()
-        today = date.today()
-        delta = (due - today).days
-        
-        if delta < 0:
-            return f"⚠️ {abs(delta)}日超過"
-        elif delta == 0:
-            return "🔥 今日まで"
-        elif delta == 1:
-            return "⏰ 明日まで"
-        elif delta <= 3:
-            return f"⏰ あと{delta}日"
-        elif delta <= 7:
-            return f"📅 あと{delta}日"
-        else:
-            return f"📅 あと{delta}日"
-    except:
-        return ""
 
 def calc_exp(priority: int, estimated_minutes: int = 30) -> int:
     """優先度と推定時間からEXPを計算"""
@@ -324,12 +299,15 @@ def show_delete_stamp_animation():
 def render_quest_card(quest: dict, show_actions: bool = False):
     """クエストカードを描画"""
     is_mine = quest["assignee"] == st.session_state.get("username", "")
+    recurrence_type = quest.get("recurrence_type", "none")
     
     with st.container(border=True):
         # タイトルと優先度
         col1, col2 = st.columns([3, 1])
         with col1:
             title = f"🎯 {quest['title']}"
+            if recurrence_type and recurrence_type != "none":
+                title += " 🔄"
             if is_mine:
                 title += " 👤"
             st.markdown(f"**{title}**")
@@ -339,11 +317,11 @@ def render_quest_card(quest: dict, show_actions: bool = False):
         # 担当者と期限
         assignee = quest["assignee"] or "未割当"
         due = quest["due_date"] or "期限なし"
-        remain = remaining_time(quest["due_date"])
-        if remain:
-            st.caption(f"👤 {assignee} | 📅 {due} ({remain})")
-        else:
-            st.caption(f"👤 {assignee} | 📅 {due}")
+        info_line = f"👤 {assignee} | 📅 {due}"
+        if recurrence_type and recurrence_type != "none":
+            rec_labels = {"daily": "毎日", "weekly": "毎週", "monthly": "毎月"}
+            info_line += f" | 🔄 {rec_labels.get(recurrence_type, recurrence_type)}"
+        st.caption(info_line)
         
         if show_actions:
             cols = st.columns(2)
@@ -377,6 +355,8 @@ def render_quest_card(quest: dict, show_actions: bool = False):
                         db.change_status(quest["id"], "Done")
                         # システムログ記録
                         db.add_comment(quest["id"], "System", "クエストを完了しました", log_type="system")
+                        # 繰り返しクエストの処理
+                        db.process_recurring_quests()
                         # EXP計算と演出
                         exp = calc_exp(quest["priority"], quest.get("estimated_minutes", 30))
                         show_exp_gain(exp)
@@ -581,9 +561,7 @@ elif page == "📃 一覧":
                 
                 with col1:
                     st.markdown(f"**🎯 {quest['title']}**")
-                    remain = remaining_time(quest["due_date"])
-                    if remain:
-                        st.caption(remain)
+
                 
                 with col2:
                     st.caption("優先度")
@@ -773,23 +751,74 @@ elif page == "✨ 作成":
         with col3:
             estimated_minutes = st.number_input("推定時間（分）", min_value=5, max_value=480, value=st.session_state.form_est, step=5)
         
+        # 繰り返し設定セクション
+        st.markdown("---")
+        st.markdown("**🔄 繰り返し設定**")
+        rec_col1, rec_col2 = st.columns(2)
+        with rec_col1:
+            recurrence_options = {
+                "none": "繰り返しなし",
+                "daily": "毎日",
+                "weekly": "毎週",
+                "monthly": "毎月"
+            }
+            recurrence_type = st.selectbox(
+                "繰り返し頻度",
+                options=list(recurrence_options.keys()),
+                format_func=lambda x: recurrence_options[x]
+            )
+        with rec_col2:
+            recurrence_end_date = st.date_input(
+                "繰り返し終了日（任意）",
+                value=None,
+                min_value=date.today(),
+                help="この日を過ぎると繰り返しが終了します"
+            )
+        
+        # 毎週の場合は曜日選択を表示
+        selected_weekdays = []
+        if recurrence_type == "weekly":
+            st.markdown("**📅 繰り返す曜日を選択**")
+            weekday_names = ["月", "火", "水", "木", "金", "土", "日"]
+            weekday_cols = st.columns(7)
+            for i, (col, name) in enumerate(zip(weekday_cols, weekday_names)):
+                with col:
+                    if st.checkbox(name, key=f"weekday_{i}"):
+                        selected_weekdays.append(i)
+            if not selected_weekdays:
+                st.warning("⚠️ 少なくとも1つの曜日を選択してください")
+        
+        if recurrence_type != "none":
+            st.info("💡 クエストを完了すると、次の期限日で自動的に新しいクエストが作成されます")
+        
         submitted = st.form_submit_button("🎉 クエストを発行", use_container_width=True)
         
         if submitted:
             if not title.strip():
                 st.error("クエスト名は必須です")
+            elif recurrence_type == "weekly" and not selected_weekdays:
+                st.error("毎週繰り返しの場合、少なくとも1つの曜日を選択してください")
             else:
                 try:
                     due_str = due_date.isoformat() if due_date else None
+                    rec_end_str = recurrence_end_date.isoformat() if recurrence_end_date else None
+                    # 曜日をカンマ区切りの文字列に変換
+                    weekdays_str = ",".join(str(d) for d in selected_weekdays) if selected_weekdays else None
                     quest_id = db.create_quest(
                         title=title,
                         description=description,
                         priority=priority,
                         due_date=due_str,
                         estimated_minutes=estimated_minutes,
-                        creator=st.session_state.username
+                        creator=st.session_state.username,
+                        recurrence_type=recurrence_type,
+                        recurrence_end_date=rec_end_str,
+                        recurrence_weekdays=weekdays_str
                     )
-                    st.success(f"クエスト「{title}」を発行しました！ (ID: {quest_id})")
+                    if recurrence_type != "none":
+                        st.success(f"🔄 繰り返しクエスト「{title}」を発行しました！ (ID: {quest_id})")
+                    else:
+                        st.success(f"クエスト「{title}」を発行しました！ (ID: {quest_id})")
                     st.balloons()
                     # フォームをクリア
                     st.session_state.form_title = ""
@@ -923,14 +952,31 @@ elif page == "📜 詳細":
             
             # 期限と残り時間
             due_display = quest["due_date"] or "なし"
-            remain = remaining_time(quest["due_date"])
-            if remain:
-                st.metric("期限", f"{due_display}", delta=remain, delta_color="off")
-            else:
-                st.metric("期限", due_display)
+            st.metric("期限", due_display)
             
             estimated = quest.get("estimated_minutes", 30)
             st.metric("推定時間", f"{estimated}分")
+            
+            # 繰り返し設定の表示
+            recurrence_type = quest.get("recurrence_type", "none")
+            if recurrence_type and recurrence_type != "none":
+                rec_labels = {"daily": "毎日", "weekly": "毎週", "monthly": "毎月"}
+                rec_display = rec_labels.get(recurrence_type, recurrence_type)
+                
+                # 曜日設定がある場合は表示
+                recurrence_weekdays = quest.get("recurrence_weekdays")
+                if recurrence_type == "weekly" and recurrence_weekdays:
+                    weekday_names = ["月", "火", "水", "木", "金", "土", "日"]
+                    weekdays = [int(d.strip()) for d in recurrence_weekdays.split(",") if d.strip().isdigit()]
+                    weekday_str = "・".join([weekday_names[d] for d in weekdays if 0 <= d <= 6])
+                    rec_display = f"毎週（{weekday_str}）"
+                
+                st.metric("🔄 繰り返し", rec_display)
+                
+                # 繰り返し終了日
+                recurrence_end_date = quest.get("recurrence_end_date")
+                if recurrence_end_date:
+                    st.caption(f"繰り返し終了: {recurrence_end_date}")
         
         st.divider()
         
