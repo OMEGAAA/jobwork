@@ -259,6 +259,20 @@ def get_comments(quest_id: int) -> list[dict]:
         return [dict(row) for row in cursor.fetchall()]
 
 
+def get_all_logs(limit: int = 100) -> list[dict]:
+    """全操作ログを取得（クエスト情報付き）"""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT c.*, q.title as quest_title
+            FROM comments c
+            LEFT JOIN quests q ON c.quest_id = q.id
+            ORDER BY c.created_at DESC
+            LIMIT ?
+        """, (limit,))
+        return [dict(row) for row in cursor.fetchall()]
+
+
 # ========== リソース操作 ==========
 
 def create_resource(title: str, url: str, category: str, tags: str, memo: str, created_by: str) -> int:

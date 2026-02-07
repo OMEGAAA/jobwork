@@ -417,7 +417,7 @@ with st.sidebar:
 
     # ページ選択
     # (旧設定の上書き)
-    menu_options = ["📋 ボード", "📃 一覧", "📅 工程表", "✨ 作成", "📜 詳細", "📊 ダッシュボード", "📚 リソース"]
+    menu_options = ["📋 ボード", "📃 一覧", "📅 工程表", "✨ 作成", "📜 詳細", "📊 ダッシュボード", "📚 リソース", "📝 操作ログ"]
     _old_options_placeholder = """
     menu_options = ["📋 ボード", "📃 一覧", "📅 工程表", "✨ 作成", "📜 詳細", "� ログ", "�📊 ダッシュボード", "📚 リソース"]
     """
@@ -448,47 +448,6 @@ with st.sidebar:
 if not st.session_state.username:
     st.info("👈 サイドバーから冒険者名を入力してください")
     st.stop()
-
-# ========== 現在時刻表示（ブラウザのローカル時刻） ==========
-st.markdown("""
-<div id="current-time-display" style="
-    text-align: right;
-    padding: 8px 16px;
-    margin-bottom: 10px;
-    background: rgba(255, 255, 255, 0.05);
-    border-radius: 10px;
-    border: 1px solid rgba(233, 69, 96, 0.3);
-">
-    <span style="color: #a0a0a0; font-size: 0.85rem;">🕐 現在時刻: </span>
-    <span id="live-clock" style="
-        font-family: 'Orbitron', monospace;
-        font-size: 1.1rem;
-        color: #ffd93d;
-        text-shadow: 0 0 10px rgba(255, 217, 61, 0.5);
-    ">--:--:--</span>
-</div>
-<script>
-function updateClock() {
-    const now = new Date();
-    const options = {
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-        hour12: false
-    };
-    const timeString = now.toLocaleString('ja-JP', options);
-    const clockElement = document.getElementById('live-clock');
-    if (clockElement) {
-        clockElement.textContent = timeString;
-    }
-}
-updateClock();
-setInterval(updateClock, 1000);
-</script>
-""", unsafe_allow_html=True)
 
 # ========== ページ: クエストボード ==========
 if page == "📋 ボード":
@@ -1521,3 +1480,88 @@ elif page == "📚 リソース":
                 st.balloons()
             except Exception as e:
                 st.error(f"アップロードエラー: {e}")
+
+# ========== ページ: 操作ログ ==========
+elif page == "📝 操作ログ":
+    st.header("📝 操作ログ")
+    st.caption("ユーザーの操作履歴とシステムログを確認できます")
+    
+    # フィルターオプション
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        log_limit = st.selectbox("表示件数", [50, 100, 200, 500], index=1)
+    
+    with col2:
+        log_type_filter = st.selectbox(
+            "ログタイプ",
+            ["すべて", "ユーザーコメント", "システムログ"],
+        )
+    
+    with col3:
+        user_filter = st.text_input("ユーザーで検索", placeholder="名前を入力...")
+    
+    st.divider()
+    
+    # ログ取得
+    all_logs = db.get_all_logs(limit=log_limit)
+    
+    # フィルタ適用
+    if log_type_filter == "ユーザーコメント":
+        all_logs = [log for log in all_logs if log.get("log_type") == "user"]
+    elif log_type_filter == "システムログ":
+        all_logs = [log for log in all_logs if log.get("log_type") == "system"]
+    
+    if user_filter:
+        all_logs = [log for log in all_logs if user_filter.lower() in (log.get("user") or "").lower()]
+    
+    st.caption(f"📊 {len(all_logs)}件のログ")
+    
+    if not all_logs:
+        st.info("操作ログがありません")
+    else:
+        for log in all_logs:
+            log_type = log.get("log_type", "user")
+            is_system = log_type == "system"
+            
+            # アイコンと色の設定
+            if is_system:
+                icon = "⚙️"
+                badge_color = "#64b5f6"
+                badge_text = "システム"
+            else:
+                icon = "💬"
+                badge_color = "#81c784"
+                badge_text = "コメント"
+            
+            with st.container(border=True):
+                # ヘッダー行
+                header_col1, header_col2 = st.columns([4, 1])
+                with header_col1:
+                    quest_title = log.get("quest_title") or f"クエスト #{log.get('quest_id')}"
+                    st.markdown(f"{icon} **{quest_title}**")
+                with header_col2:
+                    st.markdown(f"""
+                    <span style="
+                        background-color: {badge_color};
+                        color: white;
+                        padding: 2px 8px;
+                        border-radius: 10px;
+                        font-size: 0.75rem;
+                    ">{badge_text}</span>
+                    """, unsafe_allow_html=True)
+                
+                # 内容
+                st.write(log.get("content", ""))
+                
+                # フッター（ユーザー、日時）
+                user_name = log.get("user") or "不明"
+                created_at = log.get("created_at") or ""
+                st.caption(f"👤 {user_name} | 🕐 {created_at}")
+                
+                # クエスト詳細へのリンク
+                if st.button("詳細を見る", key=f"log_detail_{log.get('id')}", use_container_width=True):
+                    st.session_state.selected_quest_id = log.get("quest_id")
+                    st.session_state.current_page = "📜 詳細"
+                    st.rerun()
+
