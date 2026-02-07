@@ -4,14 +4,7 @@ db.py - SQLiteデータベース操作モジュール
 """
 import sqlite3
 from datetime import datetime
-from zoneinfo import ZoneInfo
 from contextlib import contextmanager
-
-JST = ZoneInfo("Asia/Tokyo")
-
-def get_now_jst():
-    """現在時刻(JST)をISOフォーマット文字列で取得"""
-    return datetime.now(JST).strftime('%Y-%m-%d %H:%M:%S')
 
 DATABASE = "quest_board.db"
 
@@ -54,6 +47,25 @@ def init_db():
             cursor.execute("ALTER TABLE quests ADD COLUMN estimated_minutes INTEGER DEFAULT 30")
         except sqlite3.OperationalError:
             pass  # 既に列が存在する
+        
+        # 繰り返し設定用カラム追加
+        try:
+            cursor.execute("ALTER TABLE quests ADD COLUMN recurrence_type TEXT DEFAULT 'none'")
+        except sqlite3.OperationalError:
+            pass
+        try:
+            cursor.execute("ALTER TABLE quests ADD COLUMN recurrence_end_date TEXT")
+        except sqlite3.OperationalError:
+            pass
+        try:
+            cursor.execute("ALTER TABLE quests ADD COLUMN parent_quest_id INTEGER")
+        except sqlite3.OperationalError:
+            pass
+        # 曜日選択用カラム（0=月曜〜6=日曜、カンマ区切りで保存。例: "0,2,4" = 月水金）
+        try:
+            cursor.execute("ALTER TABLE quests ADD COLUMN recurrence_weekdays TEXT")
+        except sqlite3.OperationalError:
+            pass
         
         # コメントテーブル
         cursor.execute("""
@@ -116,7 +128,10 @@ def init_db():
 
 # ========== クエスト操作 ==========
 
-def create_quest(title: str, description: str, priority: int, due_date: str, creator: str, estimated_minutes: int = 30) -> int:
+def create_quest(title: str, description: str, priority: int, due_date: str, creator: str, 
+                 estimated_minutes: int = 30, recurrence_type: str = "none", 
+                 recurrence_end_date: str = None, parent_quest_id: int = None,
+                 recurrence_weekdays: str = None) -> int:
     """クエストを新規作成し、IDを返す"""
     if not title or not title.strip():
         raise ValueError("タイトルは必須です")
@@ -125,11 +140,12 @@ def create_quest(title: str, description: str, priority: int, due_date: str, cre
     
     with get_connection() as conn:
         cursor = conn.cursor()
-        now = get_now_jst()
         cursor.execute("""
-            INSERT INTO quests (title, description, priority, due_date, estimated_minutes, creator, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """, (title.strip(), description, priority, due_date, estimated_minutes, creator.strip(), now, now))
+            INSERT INTO quests (title, description, priority, due_date, estimated_minutes, creator, 
+                               recurrence_type, recurrence_end_date, parent_quest_id, recurrence_weekdays)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (title.strip(), description, priority, due_date, estimated_minutes, creator.strip(),
+              recurrence_type, recurrence_end_date, parent_quest_id, recurrence_weekdays))
         conn.commit()
         return cursor.lastrowid
 
@@ -161,13 +177,13 @@ def get_quests_by_status(status: str) -> list[dict]:
 
 def update_quest(quest_id: int, **kwargs) -> bool:
     """クエストを更新 (可変フィールド対応)"""
-    allowed_fields = {"title", "description", "status", "priority", "due_date", "assignee", "estimated_minutes"}
+    allowed_fields = {"title", "description", "status", "priority", "due_date", "assignee", "estimated_minutes", "recurrence_type", "recurrence_end_date", "recurrence_weekdays"}
     updates = {k: v for k, v in kwargs.items() if k in allowed_fields}
     
     if not updates:
         return False
     
-    updates["updated_at"] = get_now_jst()
+    updates["updated_at"] = datetime.now().isoformat()
     set_clause = ", ".join(f"{k} = ?" for k in updates.keys())
     values = list(updates.values()) + [quest_id]
     
@@ -213,11 +229,10 @@ def add_comment(quest_id: int, user: str, content: str, file_path: str = None, l
     
     with get_connection() as conn:
         cursor = conn.cursor()
-        now = get_now_jst()
         cursor.execute("""
-            INSERT INTO comments (quest_id, user, content, file_path, log_type, created_at)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, (quest_id, user.strip(), content.strip(), file_path, log_type, now))
+            INSERT INTO comments (quest_id, user, content, file_path, log_type)
+            VALUES (?, ?, ?, ?, ?)
+        """, (quest_id, user.strip(), content.strip(), file_path, log_type))
         conn.commit()
         return cursor.lastrowid
 
@@ -243,11 +258,10 @@ def create_resource(title: str, url: str, category: str, tags: str, memo: str, c
     
     with get_connection() as conn:
         cursor = conn.cursor()
-        now = get_now_jst()
         cursor.execute("""
-            INSERT INTO resources (title, url, category, tags, memo, created_by, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """, (title.strip(), url.strip(), category, tags, memo, created_by, now, now))
+            INSERT INTO resources (title, url, category, tags, memo, created_by)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (title.strip(), url.strip(), category, tags, memo, created_by))
         conn.commit()
         return cursor.lastrowid
 
@@ -277,7 +291,7 @@ def update_resource(resource_id: int, **kwargs) -> bool:
     if not updates:
         return False
     
-    updates["updated_at"] = get_now_jst()
+    updates["updated_at"] = datetime.now().isoformat()
     set_clause = ", ".join(f"{k} = ?" for k in updates.keys())
     values = list(updates.values()) + [resource_id]
     
@@ -303,9 +317,9 @@ def increment_view_count(resource_id: int) -> bool:
         cursor = conn.cursor()
         cursor.execute("""
             UPDATE resources 
-            SET view_count = view_count + 1, last_viewed_at = ? 
+            SET view_count = view_count + 1, last_viewed_at = CURRENT_TIMESTAMP 
             WHERE id = ?
-        """, (get_now_jst(), resource_id))
+        """, (resource_id,))
         conn.commit()
         return cursor.rowcount > 0
 
@@ -355,11 +369,10 @@ def create_template(title: str, description: str, priority: int, estimated_minut
     """テンプレートを新規作成"""
     with get_connection() as conn:
         cursor = conn.cursor()
-        now = get_now_jst()
         cursor.execute("""
-            INSERT INTO quest_templates (title, description, priority, estimated_minutes, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, (title.strip(), description, priority, estimated_minutes, now, now))
+            INSERT INTO quest_templates (title, description, priority, estimated_minutes)
+            VALUES (?, ?, ?, ?)
+        """, (title.strip(), description, priority, estimated_minutes))
         conn.commit()
         return cursor.lastrowid
 
@@ -370,9 +383,9 @@ def update_template(template_id: int, title: str, description: str, priority: in
         cursor = conn.cursor()
         cursor.execute("""
             UPDATE quest_templates
-            SET title = ?, description = ?, priority = ?, estimated_minutes = ?, updated_at = ?
+            SET title = ?, description = ?, priority = ?, estimated_minutes = ?, updated_at = CURRENT_TIMESTAMP
             WHERE id = ?
-        """, (title.strip(), description, priority, estimated_minutes, get_now_jst(), template_id))
+        """, (title.strip(), description, priority, estimated_minutes, template_id))
         conn.commit()
 
 
@@ -382,3 +395,138 @@ def delete_template(template_id: int):
         cursor = conn.cursor()
         cursor.execute("DELETE FROM quest_templates WHERE id = ?", (template_id,))
         conn.commit()
+
+
+# ========== 繰り返しクエスト操作 ==========
+
+def process_recurring_quests():
+    """完了した繰り返しクエストから次のクエストを自動生成"""
+    from datetime import timedelta
+    from zoneinfo import ZoneInfo
+    
+    jst = ZoneInfo("Asia/Tokyo")
+    today = datetime.now(jst).date()
+    
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        # 完了済みで繰り返し設定があるクエストを取得
+        cursor.execute("""
+            SELECT * FROM quests 
+            WHERE status = 'Done' 
+            AND recurrence_type != 'none' 
+            AND recurrence_type IS NOT NULL
+        """)
+        recurring_quests = [dict(row) for row in cursor.fetchall()]
+    
+    for quest in recurring_quests:
+        recurrence_type = quest.get("recurrence_type", "none")
+        recurrence_end_date = quest.get("recurrence_end_date")
+        recurrence_weekdays = quest.get("recurrence_weekdays")  # 曜日設定（例: "0,2,4" = 月水金）
+        
+        # 繰り返し終了日チェック
+        if recurrence_end_date:
+            try:
+                end_date = datetime.strptime(recurrence_end_date, "%Y-%m-%d").date()
+                if today > end_date:
+                    continue  # 繰り返し終了
+            except:
+                pass
+        
+        # 次の期限日を計算
+        next_due = None
+        base_date = today  # デフォルトは今日
+        
+        if quest["due_date"]:
+            try:
+                base_date = datetime.strptime(quest["due_date"], "%Y-%m-%d").date()
+            except:
+                base_date = today
+        
+        if recurrence_type == "daily":
+            next_due = base_date + timedelta(days=1)
+            
+        elif recurrence_type == "weekly":
+            if recurrence_weekdays:
+                # 曜日指定がある場合、次の該当曜日を探す
+                weekdays = [int(d.strip()) for d in recurrence_weekdays.split(",") if d.strip().isdigit()]
+                if weekdays:
+                    # 今日の翌日から次の該当曜日を探す
+                    search_date = base_date + timedelta(days=1)
+                    for _ in range(7):  # 最大7日間探索
+                        if search_date.weekday() in weekdays:
+                            next_due = search_date
+                            break
+                        search_date += timedelta(days=1)
+                    if next_due is None:
+                        next_due = base_date + timedelta(weeks=1)
+                else:
+                    next_due = base_date + timedelta(weeks=1)
+            else:
+                # 曜日指定がない場合は単純に1週間後
+                next_due = base_date + timedelta(weeks=1)
+                
+        elif recurrence_type == "monthly":
+            # 月を加算（簡易実装）
+            month = base_date.month + 1
+            year = base_date.year
+            if month > 12:
+                month = 1
+                year += 1
+            day = min(base_date.day, 28)  # 安全のため28日まで
+            next_due = base_date.replace(year=year, month=month, day=day)
+        
+        if next_due is None:
+            continue
+            
+        # 繰り返し終了日より後の場合はスキップ
+        if recurrence_end_date:
+            try:
+                end_date = datetime.strptime(recurrence_end_date, "%Y-%m-%d").date()
+                if next_due > end_date:
+                    # 繰り返し設定を解除
+                    update_quest(quest["id"], recurrence_type="none")
+                    continue
+            except:
+                pass
+        
+        # 同じ親から既に生成されたクエストがあるかチェック
+        parent_id = quest.get("parent_quest_id") or quest["id"]
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT COUNT(*) FROM quests 
+                WHERE parent_quest_id = ? AND due_date = ?
+            """, (parent_id, next_due.isoformat()))
+            if cursor.fetchone()[0] > 0:
+                continue  # 既に生成済み
+        
+        # 新しいクエストを作成
+        create_quest(
+            title=quest["title"],
+            description=quest["description"],
+            priority=quest["priority"],
+            due_date=next_due.isoformat(),
+            creator=quest["creator"],
+            estimated_minutes=quest.get("estimated_minutes", 30),
+            recurrence_type=recurrence_type,
+            recurrence_end_date=recurrence_end_date,
+            parent_quest_id=parent_id,
+            recurrence_weekdays=recurrence_weekdays  # 曜日設定を引き継ぐ
+        )
+        
+        # 元のクエストの繰り返し設定を解除（次回はコピー先から繰り返す）
+        update_quest(quest["id"], recurrence_type="none")
+
+
+def get_quests_with_recurrence() -> list[dict]:
+    """繰り返し設定があるクエスト一覧を取得"""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT * FROM quests 
+            WHERE recurrence_type != 'none' 
+            AND recurrence_type IS NOT NULL
+            ORDER BY created_at DESC
+        """)
+        return [dict(row) for row in cursor.fetchall()]
+
