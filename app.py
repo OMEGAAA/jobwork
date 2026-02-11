@@ -335,19 +335,15 @@ def render_quest_card(quest: dict, show_actions: bool = False):
                 # 未着手の場合は受注ボタンを表示
                 if quest["status"] == "Backlog":
                     if st.button("✋ 受注", key=f"accept_{quest['id']}", use_container_width=True):
-                        # 上限チェック
-                        current_active = get_active_quest_count(st.session_state.username)
-                        if current_active >= MAX_ACTIVE_QUESTS:
-                            st.error(f"同時受注上限（{MAX_ACTIVE_QUESTS}件）に達しています")
-                        else:
-                            db.assign_quest(quest["id"], st.session_state.username)
-                            db.change_status(quest["id"], "In Progress")
-                            # システムログ記録
-                            db.add_comment(quest["id"], "System", "クエストを受注しました", log_type="system")
-                            show_stamp_animation()
-                            import time
-                            time.sleep(1.5)  # アニメーションを見せるため少し待機
-                            st.rerun()
+                        # 上限チェック解除
+                        db.assign_quest(quest["id"], st.session_state.username)
+                        db.change_status(quest["id"], "In Progress")
+                        # システムログ記録
+                        db.add_comment(quest["id"], "System", "クエストを受注しました", log_type="system")
+                        show_stamp_animation()
+                        import time
+                        time.sleep(1.5)  # アニメーションを見せるため少し待機
+                        st.rerun()
                 
                 # 進行中の場合は完了ボタンを表示
                 elif quest["status"] == "In Progress" and is_mine:
