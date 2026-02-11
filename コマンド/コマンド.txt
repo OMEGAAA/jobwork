@@ -1,1 +1,15 @@
 streamlit run app.py
+
+git branch -M main
+
+https://github.com/OMEGAAA/jobwork.git
+
+git push
+git pull
+
+更新の順番
+git add .
+
+git commit -m "ファイルを修正してみた"
+
+git push
