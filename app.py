@@ -1050,7 +1050,7 @@ elif page == "📜 詳細":
                     new_prio = st.slider("優先度", 1, 5, quest["priority"])
                 
                 with c3:
-                    new_mins = st.number_input("推定時間(分)", min_value=15, step=15, value=quest.get("estimated_minutes", 30))
+                    new_mins = st.number_input("推定時間(分)", min_value=5, step=5, value=max(5, quest.get("estimated_minutes", 30)))
 
                 if st.form_submit_button("💾 更新保存"):
                      due_str = new_due.strftime("%Y-%m-%d") if new_due else None
