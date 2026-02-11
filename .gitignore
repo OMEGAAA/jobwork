@@ -1,0 +1,9 @@
+# .gitignore
+*.db
+*.sqlite3
+__pycache__/
+.streamlit/secrets.toml
+verify_supabase.py
+venv/
+.env
+.DS_Store
